@@ -45,18 +45,27 @@ function getEdlCookie() {
   return "";
 }
 function configuredPath(key) {
+  const defaults = {
+    accounts: "/api/home/accounts",
+    balance: "/api/home/GetLatestAccountBalance?acctNo={accountNumber}",
+    latestBill: "/api/home/DetailedBill?acctNo={accountNumber}",
+    billHistory: "",
+    usage: "/api/home/accounts/{accountNumber}/load-profile",
+    paymentHistory: "/api/home/GetLatestPayments?acctNo={accountNumber}",
+    outages: "/api/outages/calendar"
+  };
   try {
     switch (key) {
-      case "accounts": return typeof EDL_PATH_ACCOUNTS === "string" ? EDL_PATH_ACCOUNTS.trim() : "";
-      case "balance": return typeof EDL_PATH_BALANCE === "string" ? EDL_PATH_BALANCE.trim() : "";
-      case "latestBill": return typeof EDL_PATH_LATEST_BILL === "string" ? EDL_PATH_LATEST_BILL.trim() : "";
-      case "billHistory": return typeof EDL_PATH_BILL_HISTORY === "string" ? EDL_PATH_BILL_HISTORY.trim() : "";
-      case "usage": return typeof EDL_PATH_USAGE === "string" ? EDL_PATH_USAGE.trim() : "";
-      case "paymentHistory": return typeof EDL_PATH_PAYMENT_HISTORY === "string" ? EDL_PATH_PAYMENT_HISTORY.trim() : "";
-      case "outages": return typeof EDL_PATH_OUTAGES === "string" ? EDL_PATH_OUTAGES.trim() : "";
+      case "accounts": return (typeof EDL_PATH_ACCOUNTS === "string" && EDL_PATH_ACCOUNTS.trim()) || defaults.accounts;
+      case "balance": return (typeof EDL_PATH_BALANCE === "string" && EDL_PATH_BALANCE.trim()) || defaults.balance;
+      case "latestBill": return (typeof EDL_PATH_LATEST_BILL === "string" && EDL_PATH_LATEST_BILL.trim()) || defaults.latestBill;
+      case "billHistory": return (typeof EDL_PATH_BILL_HISTORY === "string" && EDL_PATH_BILL_HISTORY.trim()) || defaults.billHistory;
+      case "usage": return (typeof EDL_PATH_USAGE === "string" && EDL_PATH_USAGE.trim()) || defaults.usage;
+      case "paymentHistory": return (typeof EDL_PATH_PAYMENT_HISTORY === "string" && EDL_PATH_PAYMENT_HISTORY.trim()) || defaults.paymentHistory;
+      case "outages": return (typeof EDL_PATH_OUTAGES === "string" && EDL_PATH_OUTAGES.trim()) || defaults.outages;
       default: return "";
     }
-  } catch { return ""; }
+  } catch { return defaults[key] || ""; }
 }
 function validAccountNumber(v) {
   return typeof v === "string" && /^\d{8,12}$/.test(v);
@@ -81,7 +90,7 @@ async function edlGet(path) {
   try {
     r = await fetch(url.toString(), {
       method: "GET",
-      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.5" },
+      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.6" },
       redirect: "manual"
     });
   } catch (e) {
@@ -186,7 +195,7 @@ async function discoverApiPaths() {
 
   try {
     const home = await fetch(BASE + "/", {
-      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.5" },
+      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.6" },
       redirect: "follow"
     });
     homeStatus = home.status;
@@ -210,7 +219,7 @@ async function discoverApiPaths() {
       if (bytesScanned >= maxBytes) break;
       try {
         const r = await fetch(u, {
-          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.5" },
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.6" },
           redirect: "follow"
         });
         if (!r.ok) continue;
@@ -226,7 +235,7 @@ async function discoverApiPaths() {
       try {
         const u = new URL("/" + ref.replace(/^\//, ""), BASE);
         const r = await fetch(u.toString(), {
-          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.5" },
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.6" },
           redirect: "follow"
         });
         if (!r.ok) continue;
@@ -278,7 +287,7 @@ async function callTool(name, args, privateAuthorized = false) {
     return {
       ok: true,
       service: "edlcare-mcp",
-      version: "0.3.5",
+      version: "0.3.6",
       mode: "read-only",
       edlCookieConfigured: Boolean(getEdlCookie()),
       mcpBearerConfigured: Boolean(getMcpBearerToken()),
@@ -331,11 +340,11 @@ async function callTool(name, args, privateAuthorized = false) {
 }
 
 async function handleMcp(req) {
-  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.5", transport: "streamable-http", endpoint: "/mcp" });
+  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.6", transport: "streamable-http", endpoint: "/mcp" });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let body; try { body = await req.json(); } catch { return rpcError(null, -32700, "Parse error"); }
   const id = body.id ?? null;
-  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.5" } });
+  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.6" } });
   if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
   if (body.method === "ping") return rpc(id, {});
   if (body.method === "tools/list") return rpc(id, { tools });
@@ -366,7 +375,7 @@ addEventListener("fetch", event => event.respondWith((async () => {
     return json({
       ok:true,
       name:"edlcare-mcp",
-      version:"0.3.5",
+      version:"0.3.6",
       mcp:"/mcp",
       edlCookieConfigured:Boolean(getEdlCookie()),
       mcpBearerConfigured:Boolean(getMcpBearerToken())
