@@ -70,7 +70,7 @@ async function edlGet(path) {
   try {
     r = await fetch(url.toString(), {
       method: "GET",
-      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.1" },
+      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.2" },
       redirect: "manual"
     });
   } catch (e) {
@@ -112,11 +112,31 @@ async function discoverApiPaths() {
   let homeStatus = null;
   let scriptsScanned = 0;
   let bytesScanned = 0;
+  const keywordHits = [];
+  const scriptUrlsSeen = [];
   const maxScripts = 20;
   const maxBytes = 6 * 1024 * 1024;
 
   function collect(text) {
     if (!text) return;
+    const lower = text.toLowerCase();
+    const keywords = ["account", "bill", "billing", "consumption", "payment", "outage", "meter", "transaction"];
+    for (const keyword of keywords) {
+      let from = 0;
+      let count = 0;
+      while (count < 5) {
+        const idx = lower.indexOf(keyword, from);
+        if (idx < 0) break;
+        const start = Math.max(0, idx - 140);
+        const end = Math.min(text.length, idx + keyword.length + 220);
+        const snippet = text.slice(start, end).replace(/\s+/g, " ");
+        if (!keywordHits.some(h => h.snippet === snippet)) keywordHits.push({ keyword, snippet });
+        from = idx + keyword.length;
+        count++;
+        if (keywordHits.length >= 40) break;
+      }
+      if (keywordHits.length >= 40) break;
+    }
     const patterns = [
       /["'`](\/api\/[A-Za-z0-9_?&=./{}:$%+-]+)["'`]/g,
       /["'`](api\/[A-Za-z0-9_?&=./{}:$%+-]+)["'`]/g
@@ -134,7 +154,7 @@ async function discoverApiPaths() {
 
   try {
     const home = await fetch(BASE + "/", {
-      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.1" },
+      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.2" },
       redirect: "follow"
     });
     homeStatus = home.status;
@@ -147,7 +167,10 @@ async function discoverApiPaths() {
     while ((m = re.exec(html)) !== null && scriptUrls.length < maxScripts) {
       try {
         const u = new URL(m[1], BASE);
-        if (u.origin === new URL(BASE).origin) scriptUrls.push(u.toString());
+        if (u.origin === new URL(BASE).origin) {
+          scriptUrls.push(u.toString());
+          scriptUrlsSeen.push(u.pathname);
+        }
       } catch {}
     }
 
@@ -155,7 +178,7 @@ async function discoverApiPaths() {
       if (bytesScanned >= maxBytes) break;
       try {
         const r = await fetch(u, {
-          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.1" },
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.2" },
           redirect: "follow"
         });
         if (!r.ok) continue;
@@ -166,7 +189,7 @@ async function discoverApiPaths() {
       } catch {}
     }
   } catch (e) {
-    return { ok: false, error: String(e), homeStatus, scriptsScanned, candidates: [] };
+    return { ok: false, error: String(e), homeStatus, scriptsScanned, candidates: [], keywordHits, scriptUrls: scriptUrlsSeen };
   }
 
   return {
@@ -174,7 +197,9 @@ async function discoverApiPaths() {
     homeStatus,
     scriptsScanned,
     bytesScanned,
-    candidates: Array.from(paths).sort()
+    scriptUrls: scriptUrlsSeen,
+    candidates: Array.from(paths).sort(),
+    keywordHits
   };
 }
 
@@ -203,7 +228,7 @@ async function callTool(name, args) {
     return {
       ok: true,
       service: "edlcare-mcp",
-      version: "0.3.1",
+      version: "0.3.2",
       mode: "read-only",
       edlCookieConfigured: Boolean(getEdlCookie()),
       upstream,
@@ -252,11 +277,11 @@ async function callTool(name, args) {
 }
 
 async function handleMcp(req) {
-  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.1", transport: "streamable-http", endpoint: "/mcp" });
+  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.2", transport: "streamable-http", endpoint: "/mcp" });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let body; try { body = await req.json(); } catch { return rpcError(null, -32700, "Parse error"); }
   const id = body.id ?? null;
-  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.1" } });
+  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.2" } });
   if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
   if (body.method === "ping") return rpc(id, {});
   if (body.method === "tools/list") return rpc(id, { tools });
