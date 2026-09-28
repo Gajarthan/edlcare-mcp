@@ -22,6 +22,17 @@ function rpcError(id, code, message, data) {
 function textResult(id, value, isError = false) {
   return rpc(id, { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], isError });
 }
+function getMcpBearerToken() {
+  try {
+    return typeof MCP_BEARER_TOKEN === "string" ? MCP_BEARER_TOKEN.trim() : "";
+  } catch { return ""; }
+}
+function privateAccessAuthorized(req) {
+  const expected = getMcpBearerToken();
+  if (!expected) return false;
+  const h = req.headers.get("authorization") || "";
+  return h === "Bearer " + expected;
+}
 function getEdlCookie() {
   try {
     const parts = [];
@@ -70,7 +81,7 @@ async function edlGet(path) {
   try {
     r = await fetch(url.toString(), {
       method: "GET",
-      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.2" },
+      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.3" },
       redirect: "manual"
     });
   } catch (e) {
@@ -154,7 +165,7 @@ async function discoverApiPaths() {
 
   try {
     const home = await fetch(BASE + "/", {
-      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.2" },
+      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.3" },
       redirect: "follow"
     });
     homeStatus = home.status;
@@ -178,7 +189,7 @@ async function discoverApiPaths() {
       if (bytesScanned >= maxBytes) break;
       try {
         const r = await fetch(u, {
-          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.2" },
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.3" },
           redirect: "follow"
         });
         if (!r.ok) continue;
@@ -216,7 +227,7 @@ const tools = [
   { name: "edl_get_outages", description: "Get outage information. Account number is optional if the configured EDLCare route is global.", inputSchema: { type: "object", properties: { accountNumber: { type: "string", pattern: "^\\d{8,12}$" } }, additionalProperties: false } }
 ];
 
-async function callTool(name, args) {
+async function callTool(name, args, privateAuthorized = false) {
   if (name === "edl_status") {
     let upstream = { ok: false };
     try {
@@ -228,19 +239,14 @@ async function callTool(name, args) {
     return {
       ok: true,
       service: "edlcare-mcp",
-      version: "0.3.2",
+      version: "0.3.3",
       mode: "read-only",
       edlCookieConfigured: Boolean(getEdlCookie()),
+      mcpBearerConfigured: Boolean(getMcpBearerToken()),
       upstream,
       session: {
         ok: session.ok,
-        status: session.status,
-        user: session.ok && session.data && typeof session.data === "object" ? {
-          username: session.data.username ?? null,
-          fullName: session.data.fullName ?? null,
-          portalAccessAllowed: session.data.portalAccessAllowed ?? null
-        } : null,
-        error: session.ok ? null : session.data?.error ?? session.data?.raw ?? null
+        status: session.status
       },
       discovery,
       endpoints: {
@@ -261,8 +267,17 @@ async function callTool(name, args) {
       return { ok: r.ok, status: r.status, data };
     } catch (e) { return { ok: false, status: 502, data: { error: String(e) } }; }
   }
-  if (name === "edl_me") return fetchMe();
-  if (name === "edl_list_accounts") return fetchConfigured("accounts", args);
+  if (name === "edl_me") {
+    if (!privateAuthorized) return { ok: false, status: 401, data: { error: "Private MCP access requires Authorization: Bearer <MCP_BEARER_TOKEN>" } };
+    return fetchMe();
+  }
+  if (name === "edl_list_accounts") {
+    if (!privateAuthorized) return { ok: false, status: 401, data: { error: "Private MCP access requires Authorization: Bearer <MCP_BEARER_TOKEN>" } };
+    return fetchConfigured("accounts", args);
+  }
+  if (["edl_get_balance","edl_get_latest_bill","edl_get_bill_history","edl_get_usage","edl_get_payment_history","edl_get_outages"].includes(name) && !privateAuthorized) {
+    return { ok: false, status: 401, data: { error: "Private MCP access requires Authorization: Bearer <MCP_BEARER_TOKEN>" } };
+  }
   if (name === "edl_get_outages") {
     if (args.accountNumber && !validAccountNumber(args.accountNumber)) return { ok: false, status: 400, data: { error: "Invalid account number" } };
     return fetchConfigured("outages", args);
@@ -277,18 +292,18 @@ async function callTool(name, args) {
 }
 
 async function handleMcp(req) {
-  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.2", transport: "streamable-http", endpoint: "/mcp" });
+  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.3", transport: "streamable-http", endpoint: "/mcp" });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let body; try { body = await req.json(); } catch { return rpcError(null, -32700, "Parse error"); }
   const id = body.id ?? null;
-  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.2" } });
+  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.3" } });
   if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
   if (body.method === "ping") return rpc(id, {});
   if (body.method === "tools/list") return rpc(id, { tools });
   if (body.method === "tools/call") {
     const name = body?.params?.name;
     const args = body?.params?.arguments || {};
-    const result = await callTool(name, args);
+    const result = await callTool(name, args, privateAccessAuthorized(req));
     return textResult(id, result, result.ok === false);
   }
   return rpcError(id, -32601, "Method not found");
@@ -304,12 +319,19 @@ addEventListener("fetch", event => event.respondWith((async () => {
   }});
   if (url.pathname === "/mcp") return handleMcp(req);
   if (url.pathname === "/test/me") {
+    if (!privateAccessAuthorized(req)) return json({ ok:false, error:"Unauthorized" }, 401);
     const result = await fetchMe();
     return json(result, result.ok ? 200 : result.status);
   }
   if (url.pathname === "/" || url.pathname === "/health") {
-    const status = await callTool("edl_status", {});
-    return json(status);
+    return json({
+      ok:true,
+      name:"edlcare-mcp",
+      version:"0.3.3",
+      mcp:"/mcp",
+      edlCookieConfigured:Boolean(getEdlCookie()),
+      mcpBearerConfigured:Boolean(getMcpBearerToken())
+    });
   }
   return json({ error: "Not found" }, 404);
 })()));
