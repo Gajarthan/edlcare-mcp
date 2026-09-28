@@ -81,7 +81,7 @@ async function edlGet(path) {
   try {
     r = await fetch(url.toString(), {
       method: "GET",
-      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.4" },
+      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.5" },
       redirect: "manual"
     });
   } catch (e) {
@@ -126,12 +126,20 @@ async function discoverApiPaths() {
   let bytesScanned = 0;
   const keywordHits = [];
   const scriptUrlsSeen = [];
+  const lazyAssetRefs = new Set();
   const maxScripts = 20;
   const maxBytes = 6 * 1024 * 1024;
 
   function collect(text) {
     if (!text) return;
     const lower = text.toLowerCase();
+    const assetRe = /assets\/[A-Za-z0-9_.-]+\.js/g;
+    let am;
+    while ((am = assetRe.exec(text)) !== null) {
+      const ref = am[0];
+      if (/(account|bill|billing|payment|dashboard|meter|outage)/i.test(ref)) lazyAssetRefs.add(ref);
+      if (lazyAssetRefs.size >= 60) break;
+    }
     const keywords = ["account", "bill", "billing", "consumption", "payment", "outage", "meter", "transaction"];
     for (const keyword of keywords) {
       let from = 0;
@@ -178,7 +186,7 @@ async function discoverApiPaths() {
 
   try {
     const home = await fetch(BASE + "/", {
-      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.4" },
+      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.5" },
       redirect: "follow"
     });
     homeStatus = home.status;
@@ -202,13 +210,30 @@ async function discoverApiPaths() {
       if (bytesScanned >= maxBytes) break;
       try {
         const r = await fetch(u, {
-          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.4" },
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.5" },
           redirect: "follow"
         });
         if (!r.ok) continue;
         const t = await r.text();
         bytesScanned += t.length;
         scriptsScanned++;
+        collect(t);
+      } catch {}
+    }
+
+    for (const ref of Array.from(lazyAssetRefs).slice(0, 30)) {
+      if (bytesScanned >= maxBytes) break;
+      try {
+        const u = new URL("/" + ref.replace(/^\//, ""), BASE);
+        const r = await fetch(u.toString(), {
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.5" },
+          redirect: "follow"
+        });
+        if (!r.ok) continue;
+        const t = await r.text();
+        bytesScanned += t.length;
+        scriptsScanned++;
+        scriptUrlsSeen.push(u.pathname);
         collect(t);
       } catch {}
     }
@@ -253,7 +278,7 @@ async function callTool(name, args, privateAuthorized = false) {
     return {
       ok: true,
       service: "edlcare-mcp",
-      version: "0.3.4",
+      version: "0.3.5",
       mode: "read-only",
       edlCookieConfigured: Boolean(getEdlCookie()),
       mcpBearerConfigured: Boolean(getMcpBearerToken()),
@@ -306,11 +331,11 @@ async function callTool(name, args, privateAuthorized = false) {
 }
 
 async function handleMcp(req) {
-  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.4", transport: "streamable-http", endpoint: "/mcp" });
+  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.5", transport: "streamable-http", endpoint: "/mcp" });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let body; try { body = await req.json(); } catch { return rpcError(null, -32700, "Parse error"); }
   const id = body.id ?? null;
-  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.4" } });
+  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.5" } });
   if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
   if (body.method === "ping") return rpc(id, {});
   if (body.method === "tools/list") return rpc(id, { tools });
@@ -341,7 +366,7 @@ addEventListener("fetch", event => event.respondWith((async () => {
     return json({
       ok:true,
       name:"edlcare-mcp",
-      version:"0.3.4",
+      version:"0.3.5",
       mcp:"/mcp",
       edlCookieConfigured:Boolean(getEdlCookie()),
       mcpBearerConfigured:Boolean(getMcpBearerToken())
