@@ -90,7 +90,7 @@ async function edlGet(path) {
   try {
     r = await fetch(url.toString(), {
       method: "GET",
-      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.6" },
+      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.7" },
       redirect: "manual"
     });
   } catch (e) {
@@ -149,7 +149,7 @@ async function discoverApiPaths() {
       if (/(account|bill|billing|payment|dashboard|meter|outage)/i.test(ref)) lazyAssetRefs.add(ref);
       if (lazyAssetRefs.size >= 60) break;
     }
-    const keywords = ["account", "bill", "billing", "consumption", "payment", "outage", "meter", "transaction"];
+    const keywords = ["transaction", "history", "statement", "detailedbill", "subscribedaccounts", "loadprofile", "payment", "billing", "account", "bill", "outage", "meter", "consumption"];
     for (const keyword of keywords) {
       let from = 0;
       let count = 0;
@@ -195,7 +195,7 @@ async function discoverApiPaths() {
 
   try {
     const home = await fetch(BASE + "/", {
-      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.6" },
+      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.7" },
       redirect: "follow"
     });
     homeStatus = home.status;
@@ -219,7 +219,7 @@ async function discoverApiPaths() {
       if (bytesScanned >= maxBytes) break;
       try {
         const r = await fetch(u, {
-          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.6" },
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.7" },
           redirect: "follow"
         });
         if (!r.ok) continue;
@@ -235,7 +235,7 @@ async function discoverApiPaths() {
       try {
         const u = new URL("/" + ref.replace(/^\//, ""), BASE);
         const r = await fetch(u.toString(), {
-          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.6" },
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.7" },
           redirect: "follow"
         });
         if (!r.ok) continue;
@@ -287,7 +287,7 @@ async function callTool(name, args, privateAuthorized = false) {
     return {
       ok: true,
       service: "edlcare-mcp",
-      version: "0.3.6",
+      version: "0.3.7",
       mode: "read-only",
       edlCookieConfigured: Boolean(getEdlCookie()),
       mcpBearerConfigured: Boolean(getMcpBearerToken()),
@@ -340,11 +340,11 @@ async function callTool(name, args, privateAuthorized = false) {
 }
 
 async function handleMcp(req) {
-  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.6", transport: "streamable-http", endpoint: "/mcp" });
+  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.7", transport: "streamable-http", endpoint: "/mcp" });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let body; try { body = await req.json(); } catch { return rpcError(null, -32700, "Parse error"); }
   const id = body.id ?? null;
-  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.6" } });
+  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.7" } });
   if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
   if (body.method === "ping") return rpc(id, {});
   if (body.method === "tools/list") return rpc(id, { tools });
@@ -375,7 +375,7 @@ addEventListener("fetch", event => event.respondWith((async () => {
     return json({
       ok:true,
       name:"edlcare-mcp",
-      version:"0.3.6",
+      version:"0.3.7",
       mcp:"/mcp",
       edlCookieConfigured:Boolean(getEdlCookie()),
       mcpBearerConfigured:Boolean(getMcpBearerToken())
