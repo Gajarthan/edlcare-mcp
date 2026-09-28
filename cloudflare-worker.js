@@ -70,7 +70,7 @@ async function edlGet(path) {
   try {
     r = await fetch(url.toString(), {
       method: "GET",
-      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.0" },
+      headers: { accept: "application/json, text/plain, */*", cookie, "user-agent": "edlcare-mcp/0.3.1" },
       redirect: "manual"
     });
   } catch (e) {
@@ -107,6 +107,77 @@ async function fetchConfigured(key, args = {}) {
 }
 async function fetchMe() { return edlGet("/api/auth/me"); }
 
+async function discoverApiPaths() {
+  const paths = new Set();
+  let homeStatus = null;
+  let scriptsScanned = 0;
+  let bytesScanned = 0;
+  const maxScripts = 20;
+  const maxBytes = 6 * 1024 * 1024;
+
+  function collect(text) {
+    if (!text) return;
+    const patterns = [
+      /["'`](\/api\/[A-Za-z0-9_?&=./{}:$%+-]+)["'`]/g,
+      /["'`](api\/[A-Za-z0-9_?&=./{}:$%+-]+)["'`]/g
+    ];
+    for (const re of patterns) {
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        let p = m[1];
+        if (!p.startsWith("/")) p = "/" + p;
+        if (p.length <= 300) paths.add(p);
+        if (paths.size >= 200) return;
+      }
+    }
+  }
+
+  try {
+    const home = await fetch(BASE + "/", {
+      headers: { accept: "text/html,*/*", "user-agent": "edlcare-mcp/0.3.1" },
+      redirect: "follow"
+    });
+    homeStatus = home.status;
+    const html = await home.text();
+    collect(html);
+
+    const scriptUrls = [];
+    const re = /<script[^>]+src=["']([^"']+)["']/gi;
+    let m;
+    while ((m = re.exec(html)) !== null && scriptUrls.length < maxScripts) {
+      try {
+        const u = new URL(m[1], BASE);
+        if (u.origin === new URL(BASE).origin) scriptUrls.push(u.toString());
+      } catch {}
+    }
+
+    for (const u of scriptUrls) {
+      if (bytesScanned >= maxBytes) break;
+      try {
+        const r = await fetch(u, {
+          headers: { accept: "application/javascript,text/javascript,*/*", "user-agent": "edlcare-mcp/0.3.1" },
+          redirect: "follow"
+        });
+        if (!r.ok) continue;
+        const t = await r.text();
+        bytesScanned += t.length;
+        scriptsScanned++;
+        collect(t);
+      } catch {}
+    }
+  } catch (e) {
+    return { ok: false, error: String(e), homeStatus, scriptsScanned, candidates: [] };
+  }
+
+  return {
+    ok: true,
+    homeStatus,
+    scriptsScanned,
+    bytesScanned,
+    candidates: Array.from(paths).sort()
+  };
+}
+
 const tools = [
   { name: "edl_status", description: "Check MCP health, EDLCare reachability, session configuration, and endpoint configuration.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "edl_oidc_metadata", description: "Fetch public EDLCare OpenID Connect discovery metadata.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
@@ -127,13 +198,26 @@ async function callTool(name, args) {
       const r = await fetch(OIDC, { headers: { accept: "application/json" } });
       upstream = { ok: r.ok, status: r.status };
     } catch (e) { upstream = { ok: false, error: String(e) }; }
+    const session = await fetchMe();
+    const discovery = await discoverApiPaths();
     return {
       ok: true,
       service: "edlcare-mcp",
-      version: "0.3.0",
+      version: "0.3.1",
       mode: "read-only",
       edlCookieConfigured: Boolean(getEdlCookie()),
       upstream,
+      session: {
+        ok: session.ok,
+        status: session.status,
+        user: session.ok && session.data && typeof session.data === "object" ? {
+          username: session.data.username ?? null,
+          fullName: session.data.fullName ?? null,
+          portalAccessAllowed: session.data.portalAccessAllowed ?? null
+        } : null,
+        error: session.ok ? null : session.data?.error ?? session.data?.raw ?? null
+      },
+      discovery,
       endpoints: {
         accounts: Boolean(configuredPath("accounts")),
         balance: Boolean(configuredPath("balance")),
@@ -168,11 +252,11 @@ async function callTool(name, args) {
 }
 
 async function handleMcp(req) {
-  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.0", transport: "streamable-http", endpoint: "/mcp" });
+  if (req.method === "GET") return json({ name: "edlcare-mcp", version: "0.3.1", transport: "streamable-http", endpoint: "/mcp" });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let body; try { body = await req.json(); } catch { return rpcError(null, -32700, "Parse error"); }
   const id = body.id ?? null;
-  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.0" } });
+  if (body.method === "initialize") return rpc(id, { protocolVersion: body?.params?.protocolVersion || "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "edlcare-mcp", version: "0.3.1" } });
   if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
   if (body.method === "ping") return rpc(id, {});
   if (body.method === "tools/list") return rpc(id, { tools });
